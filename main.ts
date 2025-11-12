@@ -23,6 +23,8 @@ interface LLMTaggerSettings {
     taggedFiles: { [path: string]: number }; // Map of file paths to timestamp of last tagging
     excludePatterns: string[]; // Patterns for files/folders to exclude from tagging
     ollamaUrl: string; // URL for the Ollama API server
+    language: string; // Language for LLM summaries and tags
+    customInstructions: string; // Custom instructions for the LLM
 }
 
 const DEFAULT_SETTINGS: LLMTaggerSettings = {
@@ -31,7 +33,9 @@ const DEFAULT_SETTINGS: LLMTaggerSettings = {
     autoAddTags: false,
     taggedFiles: {},
     excludePatterns: [],
-    ollamaUrl: 'http://localhost:11434'
+    ollamaUrl: 'http://localhost:11434',
+    language: 'English',
+    customInstructions: ''
 }
 
 export default class LLMTaggerPlugin extends Plugin {
@@ -423,38 +427,30 @@ export default class LLMTaggerPlugin extends Plugin {
         });
     }
 
-    private addDeterministicTags(content: string, availableTags: string[]): string {
+    private addDeterministicTags(content: string, availableTags: string[]): { content: string, tags: string[] } {
         // Convert content to lowercase for case-insensitive matching
         const lowerContent = content.toLowerCase();
-        
+
         // Create a set to track which tags we've added to avoid duplicates
         const addedTags = new Set<string>();
-        
+
         // Find matching tags
         for (const tag of availableTags) {
             // Remove # if present and convert to lowercase
             const cleanTag = tag.replace(/^#/, '').toLowerCase();
-            
+
             // Check if the tag exists as a whole word in the content
             const regex = new RegExp(`\\b${cleanTag}\\b`, 'i');
             if (regex.test(lowerContent)) {
-                addedTags.add(tag.startsWith('#') ? tag : `#${tag}`);
+                // Store without # symbol for frontmatter
+                addedTags.add(cleanTag);
             }
         }
-        
-        if (addedTags.size === 0) {
-            return content;
-        }
 
-        // Add tags at the start of the content, after any existing frontmatter
-        const frontMatterMatch = content.match(/^---\n[\s\S]*?\n---\n/);
-        if (frontMatterMatch) {
-            const frontMatter = frontMatterMatch[0];
-            const restContent = content.slice(frontMatter.length);
-            return `${frontMatter}${Array.from(addedTags).join(' ')} ${restContent}`;
-        } else {
-            return `${Array.from(addedTags).join(' ')} ${content}`;
-        }
+        return {
+            content: content,
+            tags: Array.from(addedTags)
+        };
     }
 
     async processContentWithOllama(content: string, availableTags: string[]): Promise<string> {
@@ -467,55 +463,142 @@ export default class LLMTaggerPlugin extends Plugin {
             return content;
         }
 
-        // First, add deterministic tags based on word matches
-        let processedContent = this.addDeterministicTags(content, availableTags);
+        // First, get deterministic tags based on word matches
+        const deterministicResult = this.addDeterministicTags(content, availableTags);
+        const deterministicTags = deterministicResult.tags;
 
-        // Get tag suggestions and placement from Ollama for additional semantic tagging
+        // Build the prompt with optional custom instructions
+        let prompt = `You are an expert at analyzing and tagging markdown documents. Your task is to:
+1. Provide a brief 1-2 sentence summary
+2. Suggest relevant tags from the available list
+
+Available tags: ${availableTags.join(', ')}
+
+Tags already identified: ${deterministicTags.length > 0 ? deterministicTags.join(', ') : 'none'}
+
+Instructions:
+1. Create a brief 1-2 sentence summary of the content IN ${this.settings.language.toUpperCase()}
+2. Suggest additional relevant tags from the provided list (don't repeat the tags already identified)
+3. Only use tags from the provided list
+4. Keep the summary concise and focused
+5. Write the summary in ${this.settings.language}
+6. Return ONLY the summary text, followed by suggested tags in format: tag1, tag2, tag3 (without # symbols)`;
+
+        // Add custom instructions if provided
+        if (this.settings.customInstructions) {
+            prompt += `
+
+Additional Custom Instructions:
+${this.settings.customInstructions}`;
+        }
+
+        prompt += `
+
+Content to analyze:
+${content}
+
+Provide your response in this format:
+Summary: [your summary here]
+Suggested tags: [tag1, tag2, tag3]`;
+
+        // Get tag suggestions and summary from Ollama
         const response = await fetch(`${this.settings.ollamaUrl}/api/generate`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ 
+            body: JSON.stringify({
                 model: this.settings.selectedModel,
-                prompt: `You are an expert at analyzing and tagging markdown documents. Your task is to create a brief tagged summary of the document content.
-
-Available tags: ${availableTags.join(', ')}
-
-Instructions:
-1. Create a brief 1-2 sentence summary of the content
-2. Add relevant tags from the provided list that WEREN'T already matched by word (don't repeat tags)
-3. Only use tags from the provided list
-4. Each tag MUST start with a # symbol
-5. Keep the summary concise and focused
-
-Content to analyze (with existing tags):
-${processedContent}
-
-Provide a tagged summary:`,
+                prompt: prompt,
                 stream: false
             }),
         });
         const data = await response.json();
-        
-        // Get the LLM's tagged summary
-        const taggedSummary = data.response.trim();
-        
-        // If we got a valid response, combine it with metadata and original content
-        if (taggedSummary) {
-            const timestamp = new Date().toISOString();
-            return `---
-LLM-tagged: ${timestamp}
----
 
-${taggedSummary}
+        // Parse the LLM response
+        const llmResponse = data.response.trim();
+        let summary = '';
+        let llmTags: string[] = [];
 
----
+        // Try to extract summary and tags from the response
+        const summaryMatch = llmResponse.match(/Summary:\s*(.+?)(?:\n|$)/i);
+        const tagsMatch = llmResponse.match(/Suggested tags:\s*(.+?)(?:\n|$)/i);
 
-${processedContent}`;
+        if (summaryMatch) {
+            summary = summaryMatch[1].trim();
+        } else {
+            // If format not followed, use first sentence as summary
+            summary = llmResponse.split('\n')[0].trim();
         }
-        
-        return processedContent;
+
+        if (tagsMatch) {
+            llmTags = tagsMatch[1]
+                .split(',')
+                .map((tag: string) => tag.trim().replace(/^#/, ''))
+                .filter((tag: string) => tag);
+        }
+
+        // Combine deterministic and LLM tags, remove duplicates
+        const allTags = [...new Set([...deterministicTags, ...llmTags])];
+
+        // Build the final content with proper frontmatter
+        return this.insertTagsIntoFrontmatter(content, allTags, summary);
+    }
+
+    private insertTagsIntoFrontmatter(content: string, tags: string[], summary: string): string {
+        const timestamp = new Date().toISOString();
+
+        // Check if content already has frontmatter
+        const frontMatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+
+        if (frontMatterMatch) {
+            // Content has existing frontmatter
+            const existingFrontmatter = frontMatterMatch[1];
+            const bodyContent = frontMatterMatch[2];
+
+            // Parse existing frontmatter to preserve other fields
+            const lines = existingFrontmatter.split('\n');
+            const newLines: string[] = [];
+
+            for (const line of lines) {
+                if (line.trim().startsWith('tags:')) {
+                    // Skip existing tags line, we'll add our own
+                    continue;
+                } else if (line.trim().startsWith('LLM-tagged:')) {
+                    // Skip existing LLM-tagged line
+                    continue;
+                } else if (line.trim().startsWith('LLM-summary:')) {
+                    // Skip existing LLM-summary line
+                    continue;
+                } else {
+                    newLines.push(line);
+                }
+            }
+
+            // Add our fields at the beginning
+            const frontmatterFields = [
+                `tags: [${tags.join(', ')}]`,
+                `LLM-tagged: ${timestamp}`,
+                `LLM-summary: "${summary.replace(/"/g, '\\"')}"`
+            ];
+
+            const finalFrontmatter = [...frontmatterFields, ...newLines].join('\n');
+
+            return `---\n${finalFrontmatter}\n---\n${bodyContent}`;
+        } else {
+            // No existing frontmatter, create new one
+            const frontmatter = [
+                '---',
+                `tags: [${tags.join(', ')}]`,
+                `LLM-tagged: ${timestamp}`,
+                `LLM-summary: "${summary.replace(/"/g, '\\"')}"`,
+                '---',
+                '',
+                content
+            ].join('\n');
+
+            return frontmatter;
+        }
     }
 
     private shouldProcessFile(file: TFile): boolean {
@@ -562,8 +645,84 @@ ${processedContent}`;
     }
 
     private isAlreadyTagged(content: string): boolean {
-        // Check if content already has our metadata section
-        return content.includes('---\nLLM-tagged:');
+        // Check if content has frontmatter with LLM-tagged field
+        const frontMatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
+        if (!frontMatterMatch) {
+            return false;
+        }
+
+        const frontmatter = frontMatterMatch[1];
+        return frontmatter.includes('LLM-tagged:');
+    }
+
+    private removeLLMTagsFromContent(content: string): string {
+        // Check if content has frontmatter
+        const frontMatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+
+        if (!frontMatterMatch) {
+            return content; // No frontmatter, nothing to clean
+        }
+
+        const existingFrontmatter = frontMatterMatch[1];
+        const bodyContent = frontMatterMatch[2];
+
+        // Parse existing frontmatter and remove LLM-added fields
+        const lines = existingFrontmatter.split('\n');
+        const cleanedLines: string[] = [];
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            // Skip LLM-related fields
+            if (trimmed.startsWith('LLM-tagged:')) {
+                continue;
+            } else if (trimmed.startsWith('LLM-summary:')) {
+                // LLM-summary might be multiline with quotes
+                // Skip until we find the closing quote
+                if (trimmed.match(/LLM-summary:\s*".*"$/)) {
+                    // Single line summary
+                    continue;
+                } else {
+                    // Multiline summary - skip until closing quote
+                    while (i < lines.length && !lines[i].includes('"')) {
+                        i++;
+                    }
+                    continue;
+                }
+            } else if (trimmed.startsWith('tags:')) {
+                // Check if the line has the pattern we created: tags: [...]
+                // If it matches our format and has LLM-tagged nearby, skip it
+                // Otherwise keep it (might be user-added tags)
+
+                // For now, if there's an LLM-tagged field in the frontmatter,
+                // assume the tags: field is ours and remove it
+                if (existingFrontmatter.includes('LLM-tagged:')) {
+                    // Check if tags is a single line or multiline array
+                    if (trimmed.includes('[') && !trimmed.includes(']')) {
+                        // Multiline array, skip until closing bracket
+                        while (i < lines.length && !lines[i].includes(']')) {
+                            i++;
+                        }
+                    }
+                    continue;
+                } else {
+                    // No LLM-tagged field, keep the tags
+                    cleanedLines.push(line);
+                }
+            } else {
+                // Keep all other frontmatter fields
+                cleanedLines.push(line);
+            }
+        }
+
+        // If there are remaining frontmatter fields, keep the frontmatter block
+        if (cleanedLines.length > 0 && cleanedLines.some(line => line.trim() !== '')) {
+            return `---\n${cleanedLines.join('\n')}\n---\n${bodyContent}`;
+        } else {
+            // No frontmatter left, return just the body
+            return bodyContent;
+        }
     }
 
     async addTagsToDocuments(view?: LLMTaggerView) {
@@ -675,39 +834,19 @@ ${processedContent}`;
                 
                 try {
                     const content = await this.app.vault.read(file);
-                    let cleanedContent = content;
-                    let wasModified = false;
-                    
+
                     // Check if the file has LLM Tagger tags
-                    if (this.isAlreadyTagged(content)) {
-                        // Pattern to match the entire tagged section:
-                        // 1. The metadata section with LLM-tagged
-                        // 2. The summary text
-                        // 3. The divider (---)
-                        // 4. Optional newlines after the divider
-                        const taggedSectionPattern = /---\nLLM-tagged:[\s\S]*?---\n\n[\s\S]*?\n\n---\n+/;
-                        
-                        // Remove the entire tagged section
-                        cleanedContent = content.replace(taggedSectionPattern, '');
-                        
-                        if (cleanedContent !== content) {
-                            wasModified = true;
-                        }
+                    if (!this.isAlreadyTagged(content)) {
+                        continue; // Skip files without LLM tags
                     }
-                    
-                    // Also look for tags at the beginning of the document (outside frontmatter)
-                    const tagPattern = /^(#\w+\s*)+/;
-                    if (tagPattern.test(cleanedContent)) {
-                        // Remove tags at the beginning
-                        cleanedContent = cleanedContent.replace(tagPattern, '').trim();
-                        wasModified = true;
-                    }
-                    
+
+                    const cleanedContent = this.removeLLMTagsFromContent(content);
+
                     // Update the file if content changed
-                    if (wasModified) {
+                    if (cleanedContent !== content) {
                         await this.app.vault.modify(file, cleanedContent);
                         modified++;
-                        
+
                         // Remove from tagged files record
                         delete this.settings.taggedFiles[file.path];
                     }
@@ -778,42 +917,25 @@ ${processedContent}`;
 
         try {
             const content = await this.app.vault.read(activeFile);
-            let cleanedContent = content;
-            let wasModified = false;
-            
+
             // Check if the file has LLM Tagger tags
-            if (this.isAlreadyTagged(content)) {
-                // Pattern to match the entire tagged section:
-                // 1. The metadata section with LLM-tagged
-                // 2. The summary text
-                // 3. The divider (---)
-                // 4. Optional newlines after the divider
-                const taggedSectionPattern = /---\nLLM-tagged:[\s\S]*?---\n\n[\s\S]*?\n\n---\n+/;
-                
-                // Remove the entire tagged section
-                cleanedContent = content.replace(taggedSectionPattern, '');
-                
-                if (cleanedContent !== content) {
-                    wasModified = true;
-                }
+            if (!this.isAlreadyTagged(content)) {
+                new Notice('This file has no LLM tags to remove');
+                return;
             }
-            
-            // Also look for tags at the beginning of the document (outside frontmatter)
-            const tagPattern = /^(#\w+\s*)+/;
-            if (tagPattern.test(cleanedContent)) {
-                // Remove tags at the beginning
-                cleanedContent = cleanedContent.replace(tagPattern, '').trim();
-                wasModified = true;
-            }
-            
+
+            const cleanedContent = this.removeLLMTagsFromContent(content);
+
             // Update the file if content changed
-            if (wasModified) {
+            if (cleanedContent !== content) {
                 await this.app.vault.modify(activeFile, cleanedContent);
-                
+
                 // Remove from tagged files record
                 delete this.settings.taggedFiles[activeFile.path];
                 await this.saveSettings();
                 new Notice(`Untagged: ${activeFile.basename}`);
+            } else {
+                new Notice('No changes made');
             }
         } catch (error) {
             console.error(`Error untagging ${activeFile.basename}:`, error);
@@ -1138,6 +1260,52 @@ class LLMTaggerSettingTab extends PluginSettingTab {
                     this.plugin.settings.selectedModel = value || null;
                     await this.plugin.saveSettings();
                 });
+            });
+
+        new Setting(containerEl)
+            .setName('Summary language')
+            .setDesc('Select the language for LLM-generated summaries and tags')
+            .addDropdown(dropdown => {
+                dropdown.addOption('English', 'English');
+                dropdown.addOption('Spanish', 'Spanish');
+                dropdown.addOption('French', 'French');
+                dropdown.addOption('German', 'German');
+                dropdown.addOption('Italian', 'Italian');
+                dropdown.addOption('Portuguese', 'Portuguese');
+                dropdown.addOption('Dutch', 'Dutch');
+                dropdown.addOption('Russian', 'Russian');
+                dropdown.addOption('Chinese', 'Chinese');
+                dropdown.addOption('Japanese', 'Japanese');
+                dropdown.addOption('Korean', 'Korean');
+                dropdown.addOption('Arabic', 'Arabic');
+                dropdown.addOption('Hindi', 'Hindi');
+                dropdown.addOption('Turkish', 'Turkish');
+                dropdown.addOption('Polish', 'Polish');
+                dropdown.addOption('Swedish', 'Swedish');
+                dropdown.addOption('Norwegian', 'Norwegian');
+                dropdown.addOption('Danish', 'Danish');
+                dropdown.addOption('Finnish', 'Finnish');
+                dropdown.setValue(this.plugin.settings.language);
+                dropdown.onChange(async (value) => {
+                    this.plugin.settings.language = value;
+                    await this.plugin.saveSettings();
+                });
+            });
+
+        new Setting(containerEl)
+            .setName('Custom instructions')
+            .setDesc('Additional instructions for the LLM (optional). These will be added to the prompt if provided.')
+            .addTextArea(text => {
+                text.setPlaceholder('e.g., Only use tags from the closed list. Do not invent new tags...')
+                    .setValue(this.plugin.settings.customInstructions)
+                    .onChange(async (value) => {
+                        this.plugin.settings.customInstructions = value.trim();
+                        await this.plugin.saveSettings();
+                    });
+
+                // Make the textarea taller for longer instructions
+                text.inputEl.rows = 8;
+                text.inputEl.cols = 50;
             });
 
         new Setting(containerEl)

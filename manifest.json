@@ -1,13 +1,10 @@
-{ 
-  "id": "llm-tagger", 
-  "name": "LLM Tagger", 
-  "version": "1.1.2", 
-  "minAppVersion": "1.0.0", 
-  "description": "Automatically tag your notes using local LLMs via Ollama", 
-  "author": "David Jayatillake", 
-  "authorUrl": "https://github.com/djayatillake", 
-  "isDesktopOnly": true,
-  "fundingUrl": {
-    "GitHub": "https://github.com/sponsors/djayatillake"
-  }
+{
+  "id": "llm-tagger-enhanced",
+  "name": "LLM Tagger Enhanced",
+  "version": "2.0.0",
+  "minAppVersion": "1.0.0",
+  "description": "Enhanced fork: Tag notes with Ollama LLMs - Multi-language support, custom instructions, and proper frontmatter integration",
+  "author": "freequest (forked from David Jayatillake)",
+  "authorUrl": "https://github.com/freequest",
+  "isDesktopOnly": true
 }
