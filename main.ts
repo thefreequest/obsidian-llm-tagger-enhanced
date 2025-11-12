@@ -427,16 +427,6 @@ export default class LLMTaggerPlugin extends Plugin {
         });
     }
 
-    private addDeterministicTags(content: string, _availableTags: string[]): { content: string, tags: string[] } {
-        // Deterministic tagging is now DISABLED by default
-        // The LLM will handle all tag selection for better accuracy
-        // This prevents over-tagging when common words appear in the tag list
-
-        return {
-            content: content,
-            tags: []
-        };
-    }
 
     async processContentWithOllama(content: string, availableTags: string[]): Promise<string> {
         if (!this.settings.selectedModel) {
@@ -448,24 +438,29 @@ export default class LLMTaggerPlugin extends Plugin {
             return content;
         }
 
-        // First, get deterministic tags based on word matches
-        const deterministicResult = this.addDeterministicTags(content, availableTags);
-        const deterministicTags = deterministicResult.tags;
+        // Deterministic tagging is disabled, LLM handles all selection
+        const deterministicTags: string[] = [];
 
         // Build the prompt with optional custom instructions
-        let prompt = `You are an expert at analyzing and tagging markdown documents. Your task is to identify the MAIN themes and topics.
+        let prompt = `You are an expert at analyzing and tagging markdown documents.
+
+CRITICAL RULES:
+- You MUST select EXACTLY 3 to 5 tags maximum
+- Select ONLY the MOST IMPORTANT themes
+- Do NOT list every tag that could apply
+- Think: "What are the 3 CORE topics of this text?"
 
 Available tags: ${availableTags.join(', ')}
 
-Instructions:
-1. Create a brief 1-2 sentence summary of the content IN ${this.settings.language.toUpperCase()}
-2. Select 3-5 tags that BEST represent the MAIN themes and topics of the content
-3. ONLY use tags from the provided list above
-4. Do NOT include every tag that appears as a word in the text
-5. Focus on the PRIMARY topics and themes, not every mentioned concept
-6. Keep the summary concise and focused
-7. Write the summary in ${this.settings.language}
-8. Return tags in format: tag1, tag2, tag3 (without # symbols)`;
+Your task:
+1. Read the content carefully
+2. Identify the 3-5 MOST IMPORTANT themes (not all possible themes)
+3. Write a brief 1-2 sentence summary in ${this.settings.language}
+4. Return ONLY the most relevant tags
+
+Format your response EXACTLY like this:
+Summary: [your summary here]
+Suggested tags: tag1, tag2, tag3`;
 
         // Add custom instructions if provided
         if (this.settings.customInstructions) {
@@ -518,11 +513,17 @@ Suggested tags: [tag1, tag2, tag3]`;
             llmTags = tagsMatch[1]
                 .split(',')
                 .map((tag: string) => tag.trim().replace(/^#/, ''))
-                .filter((tag: string) => tag);
+                .filter((tag: string) => tag)
+                .slice(0, 5); // HARD LIMIT: Maximum 5 tags from LLM
         }
 
         // Combine deterministic and LLM tags, remove duplicates
-        const allTags = [...new Set([...deterministicTags, ...llmTags])];
+        let allTags = [...new Set([...deterministicTags, ...llmTags])];
+
+        // ENFORCE maximum 5 tags total
+        if (allTags.length > 5) {
+            allTags = allTags.slice(0, 5);
+        }
 
         // Build the final content with proper frontmatter
         return this.insertTagsIntoFrontmatter(content, allTags, summary);

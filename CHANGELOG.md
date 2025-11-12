@@ -5,22 +5,40 @@ All notable changes to the LLM Tagger Enhanced plugin will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.2] - 2025-11-12
+
+### 🐛 Fixed
+
+#### Critical: LLM Ignoring Tag Limits
+- **Fixed**: LLM was still returning 80+ tags despite prompt instructions
+- **Problem**: Initial v2.0.1 fix was insufficient
+  - LLM ignored "3-5 tags" instruction in prompt
+  - No hard enforcement of tag count limits
+  - Deterministic tagging method still called (performance impact)
+- **Solution**:
+  - Completely rewrote prompt with "CRITICAL RULES" section
+  - Added hard limit: `.slice(0, 5)` to enforce maximum 5 tags
+  - Removed unused `addDeterministicTags()` method entirely
+  - Simplified tag processing pipeline
+- **Impact**:
+  - Tags now strictly limited to 3-5 most relevant themes
+  - Improved performance (removed unnecessary method calls)
+  - Clean codebase (removed dead code)
+
 ## [2.0.1] - 2025-11-12
 
 ### 🐛 Fixed
 
-#### Critical: Over-tagging Issue
+#### Critical: Over-tagging Issue (Initial Attempt)
 - **Fixed**: Plugin was selecting 80+ tags instead of 3-5 relevant tags
 - **Problem**: Deterministic word-matching was too aggressive
   - Matched every word in content against tag list
   - Example: "arte", "cultura", "deseo" all matched as words
   - Defeated purpose of selective tagging
 - **Solution**:
-  - Disabled deterministic tagging completely
-  - Let LLM handle all tag selection for context-aware decisions
+  - Disabled deterministic tagging by returning empty array
   - Updated prompt to emphasize "3-5 MAIN themes" only
-  - Added explicit instruction: "Do NOT include every tag that appears as a word"
-- **Impact**: Tags now highly selective and relevant to main themes
+- **Note**: This fix was incomplete - see v2.0.2 for full resolution
 
 #### Install Script Path Validation
 - **Fixed**: Better validation when user provides `.obsidian` path
