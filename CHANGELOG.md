@@ -5,6 +5,27 @@ All notable changes to the LLM Tagger Enhanced plugin will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.1] - 2025-11-12
+
+### 🐛 Fixed
+
+#### Literary Genre Detection Not Working
+- **Fixed**: Genre tags were not being detected/included in results
+- **Problem**:
+  - Prompt was too subtle about genre detection
+  - Genre tag counted against thematic tag limit
+  - LLM treated genre as optional
+- **Solution**:
+  - Made genre detection REQUIRED in prompt when enabled
+  - Genre tag now separate from thematic tag count
+  - Explicit instruction: "1 genre tag + N thematic tags"
+  - Genre tag must be returned FIRST
+  - Increased effective max by +1 when genre detection enabled
+- **Impact**:
+  - With min=5, max=10, genre enabled: returns 1 genre + 5-10 thematic tags (6-11 total)
+  - Genre always included when feature enabled
+  - Better classification for creative writing
+
 ## [2.1.0] - 2025-11-12
 
 ### ✨ Added

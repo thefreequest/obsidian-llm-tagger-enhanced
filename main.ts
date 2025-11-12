@@ -457,58 +457,57 @@ export default class LLMTaggerPlugin extends Plugin {
         // Deterministic tagging is disabled, LLM handles all selection
         const deterministicTags: string[] = [];
 
-        // Prepare available tags list (include literary genres if enabled)
-        let tagsForPrompt = availableTags;
-        if (this.settings.detectLiteraryGenre) {
-            // Add literary genres to available tags for this analysis
-            tagsForPrompt = [...new Set([...availableTags, ...LITERARY_GENRES])];
-        }
-
         // Build the prompt with configurable tag count
         let prompt = `You are an expert at analyzing and tagging markdown documents.
 
 CRITICAL RULES:
-- You MUST select between ${this.settings.minTags} and ${this.settings.maxTags} tags
+- You MUST select between ${this.settings.minTags} and ${this.settings.maxTags} THEMATIC tags
 - Select ONLY the MOST IMPORTANT themes
 - Do NOT list every tag that could apply
 - Do NOT add explanations or justifications after tags
 - Do NOT use parentheses or brackets with tags
-- Think: "What are the ${this.settings.minTags}-${this.settings.maxTags} CORE topics of this text?"
-
-Available tags: ${tagsForPrompt.join(', ')}`;
+- Think: "What are the ${this.settings.minTags}-${this.settings.maxTags} CORE topics of this text?"`;
 
         // Add literary genre detection instructions if enabled
         if (this.settings.detectLiteraryGenre) {
             prompt += `
 
-LITERARY GENRE DETECTION:
-If this text is a creative/literary work, also identify its genre from these options:
+LITERARY GENRE DETECTION (REQUIRED):
+First, determine the literary genre of this text from these options:
 ${LITERARY_GENRES.join(', ')}
 
-Include the genre tag along with the thematic tags.`;
+The genre tag is SEPARATE from the ${this.settings.minTags}-${this.settings.maxTags} thematic tags.
+You should return: 1 genre tag + ${this.settings.minTags}-${this.settings.maxTags} thematic tags.`;
         }
 
         prompt += `
 
-Your task:
-1. Read the content carefully
-2. Identify the ${this.settings.minTags}-${this.settings.maxTags} MOST IMPORTANT themes (not all possible themes)`;
+Available thematic tags: ${availableTags.join(', ')}
+
+Your task:`;
 
         if (this.settings.detectLiteraryGenre) {
             prompt += `
-3. If applicable, identify the literary genre`;
+1. First, identify the literary genre (REQUIRED - pick the closest match)
+2. Then, select ${this.settings.minTags}-${this.settings.maxTags} THEMATIC tags (not counting the genre)
+3. Write a brief 1-2 sentence summary in ${this.settings.language}
+4. Return the genre tag FIRST, then the thematic tags`;
+        } else {
+            prompt += `
+1. Read the content carefully
+2. Identify the ${this.settings.minTags}-${this.settings.maxTags} MOST IMPORTANT themes
+3. Write a brief 1-2 sentence summary in ${this.settings.language}
+4. Return ONLY the tag names without any explanations`;
         }
 
         prompt += `
-${this.settings.detectLiteraryGenre ? '4' : '3'}. Write a brief 1-2 sentence summary in ${this.settings.language}
-${this.settings.detectLiteraryGenre ? '5' : '4'}. Return ONLY the tag names without any explanations
 
 IMPORTANT: Return tags EXACTLY as they appear in the available tags list.
 Do NOT add explanations like "tag (because reason)" or "tag [justification]".
 
 Format your response EXACTLY like this:
 Summary: [your summary here]
-Suggested tags: tag1, tag2, tag3`;
+Suggested tags: ${this.settings.detectLiteraryGenre ? 'genre_tag, ' : ''}tag1, tag2, tag3`;
 
         // Add custom instructions if provided
         if (this.settings.customInstructions) {
@@ -563,7 +562,7 @@ Suggested tags: [tag1, tag2, tag3]`;
                 ? [...availableTags, ...LITERARY_GENRES]
                 : availableTags;
 
-            llmTags = tagsMatch[1]
+            const cleanedTags = tagsMatch[1]
                 .split(',')
                 .map((tag: string) => {
                     // Remove # symbols
@@ -574,16 +573,26 @@ Suggested tags: [tag1, tag2, tag3]`;
                     tag = tag.replace(/\s*\[[^\]]*\]/g, '').trim();
                     return tag;
                 })
-                .filter((tag: string) => tag && validTags.includes(tag)) // Only keep valid tags
-                .slice(0, this.settings.maxTags); // HARD LIMIT: Use configured max
+                .filter((tag: string) => tag && validTags.includes(tag)); // Only keep valid tags
+
+            // When genre detection is enabled, allow maxTags + 1 to accommodate genre tag
+            const effectiveMax = this.settings.detectLiteraryGenre
+                ? this.settings.maxTags + 1
+                : this.settings.maxTags;
+
+            llmTags = cleanedTags.slice(0, effectiveMax); // HARD LIMIT: Use configured max (+1 for genre if enabled)
         }
 
         // Combine deterministic and LLM tags, remove duplicates
         let allTags = [...new Set([...deterministicTags, ...llmTags])];
 
-        // ENFORCE maximum tags as configured
-        if (allTags.length > this.settings.maxTags) {
-            allTags = allTags.slice(0, this.settings.maxTags);
+        // ENFORCE maximum tags as configured (allow +1 for genre if enabled)
+        const effectiveMax = this.settings.detectLiteraryGenre
+            ? this.settings.maxTags + 1
+            : this.settings.maxTags;
+
+        if (allTags.length > effectiveMax) {
+            allTags = allTags.slice(0, effectiveMax);
         }
 
         // Build the final content with proper frontmatter
