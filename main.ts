@@ -427,29 +427,14 @@ export default class LLMTaggerPlugin extends Plugin {
         });
     }
 
-    private addDeterministicTags(content: string, availableTags: string[]): { content: string, tags: string[] } {
-        // Convert content to lowercase for case-insensitive matching
-        const lowerContent = content.toLowerCase();
-
-        // Create a set to track which tags we've added to avoid duplicates
-        const addedTags = new Set<string>();
-
-        // Find matching tags
-        for (const tag of availableTags) {
-            // Remove # if present and convert to lowercase
-            const cleanTag = tag.replace(/^#/, '').toLowerCase();
-
-            // Check if the tag exists as a whole word in the content
-            const regex = new RegExp(`\\b${cleanTag}\\b`, 'i');
-            if (regex.test(lowerContent)) {
-                // Store without # symbol for frontmatter
-                addedTags.add(cleanTag);
-            }
-        }
+    private addDeterministicTags(content: string, _availableTags: string[]): { content: string, tags: string[] } {
+        // Deterministic tagging is now DISABLED by default
+        // The LLM will handle all tag selection for better accuracy
+        // This prevents over-tagging when common words appear in the tag list
 
         return {
             content: content,
-            tags: Array.from(addedTags)
+            tags: []
         };
     }
 
@@ -468,21 +453,19 @@ export default class LLMTaggerPlugin extends Plugin {
         const deterministicTags = deterministicResult.tags;
 
         // Build the prompt with optional custom instructions
-        let prompt = `You are an expert at analyzing and tagging markdown documents. Your task is to:
-1. Provide a brief 1-2 sentence summary
-2. Suggest relevant tags from the available list
+        let prompt = `You are an expert at analyzing and tagging markdown documents. Your task is to identify the MAIN themes and topics.
 
 Available tags: ${availableTags.join(', ')}
 
-Tags already identified: ${deterministicTags.length > 0 ? deterministicTags.join(', ') : 'none'}
-
 Instructions:
 1. Create a brief 1-2 sentence summary of the content IN ${this.settings.language.toUpperCase()}
-2. Suggest additional relevant tags from the provided list (don't repeat the tags already identified)
-3. Only use tags from the provided list
-4. Keep the summary concise and focused
-5. Write the summary in ${this.settings.language}
-6. Return ONLY the summary text, followed by suggested tags in format: tag1, tag2, tag3 (without # symbols)`;
+2. Select 3-5 tags that BEST represent the MAIN themes and topics of the content
+3. ONLY use tags from the provided list above
+4. Do NOT include every tag that appears as a word in the text
+5. Focus on the PRIMARY topics and themes, not every mentioned concept
+6. Keep the summary concise and focused
+7. Write the summary in ${this.settings.language}
+8. Return tags in format: tag1, tag2, tag3 (without # symbols)`;
 
         // Add custom instructions if provided
         if (this.settings.customInstructions) {
