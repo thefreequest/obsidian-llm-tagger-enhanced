@@ -25,10 +25,25 @@ echo ""
 # Prompt for vault path
 echo "Enter the full path to your Obsidian vault:"
 echo "(e.g., /Users/yourname/Documents/MyVault)"
+echo ""
+echo "Note: Enter the vault ROOT directory, not the .obsidian folder"
+echo "Example: /Users/yourname/Library/Mobile Documents/iCloud~md~obsidian/Documents/MyVault"
 read -r VAULT_PATH
 
 # Remove trailing slash if present
 VAULT_PATH="${VAULT_PATH%/}"
+
+# Check if user accidentally provided the .obsidian path
+if [[ "$VAULT_PATH" == *"/.obsidian" ]]; then
+    echo ""
+    echo "⚠️  It looks like you provided the .obsidian directory path."
+    echo "Please provide the VAULT ROOT directory instead."
+    echo ""
+    echo "You entered: $VAULT_PATH"
+    echo "You should use: ${VAULT_PATH%/.obsidian}"
+    echo ""
+    exit 1
+fi
 
 # Check if vault path exists
 if [ ! -d "$VAULT_PATH" ]; then
@@ -38,7 +53,13 @@ fi
 
 # Check if .obsidian directory exists
 if [ ! -d "$VAULT_PATH/.obsidian" ]; then
-    echo "Error: .obsidian directory not found. Is this a valid Obsidian vault?"
+    echo ""
+    echo "Error: .obsidian directory not found in: $VAULT_PATH"
+    echo ""
+    echo "This doesn't appear to be a valid Obsidian vault."
+    echo "Please make sure you're providing the vault ROOT directory,"
+    echo "not a subdirectory within the vault."
+    echo ""
     exit 1
 fi
 
