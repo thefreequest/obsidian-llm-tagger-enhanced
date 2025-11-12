@@ -5,6 +5,29 @@ All notable changes to the LLM Tagger Enhanced plugin will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2025-11-12
+
+### 🐛 Fixed
+
+#### Critical: Over-tagging Issue
+- **Fixed**: Plugin was selecting 80+ tags instead of 3-5 relevant tags
+- **Problem**: Deterministic word-matching was too aggressive
+  - Matched every word in content against tag list
+  - Example: "arte", "cultura", "deseo" all matched as words
+  - Defeated purpose of selective tagging
+- **Solution**:
+  - Disabled deterministic tagging completely
+  - Let LLM handle all tag selection for context-aware decisions
+  - Updated prompt to emphasize "3-5 MAIN themes" only
+  - Added explicit instruction: "Do NOT include every tag that appears as a word"
+- **Impact**: Tags now highly selective and relevant to main themes
+
+#### Install Script Path Validation
+- **Fixed**: Better validation when user provides `.obsidian` path
+- Auto-detect and suggest correct vault root path
+- Clearer error messages with examples
+- Support for iCloud vault paths
+
 ## [2.0.0] - 2025-11-12
 
 ### 🎉 Major Release - Enhanced Fork
