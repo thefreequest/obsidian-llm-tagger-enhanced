@@ -5,6 +5,35 @@ All notable changes to the LLM Tagger Enhanced plugin will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2025-11-12
+
+### ✨ Added
+
+#### Configurable Tag Count
+- **Feature**: Adjustable minimum and maximum tag counts
+- **Implementation**:
+  - Added `minTags` and `maxTags` settings (default: 3-5)
+  - Slider controls in settings UI (range: 1-10)
+  - Automatic validation: min can't exceed max, max can't go below min
+  - Dynamic prompt updates based on configured range
+- **Benefit**: Users can customize tag density per their workflow
+
+#### Literary Genre Auto-Detection
+- **Feature**: Automatically detect and tag literary genres
+- **Implementation**:
+  - Added 29 literary genre tags: poesia, prosa_poetica, diario, ensayo, relato, cuento, microcuento, novela_corta, cronica, carta, epistolario, aforismo, nota, fragmento, memorias, autobiografia, biografia, testimonio, dialogo, monologo, teatro_breve, escena, guion, haiku, tanka, soneto, oda, elegia, satira, epigrama, romance
+  - Toggle setting to enable/disable genre detection
+  - When enabled, genre tags are added to available tags for LLM
+  - Separate validation for genre tags
+- **Benefit**: Easy classification and collection of creative writing by genre
+- **Use Case**: Perfect for writers organizing poems, essays, short stories, etc.
+
+### 🔧 Changed
+
+- Prompt now uses configurable tag count instead of hardcoded "3-5"
+- Tag validation now includes literary genres when detection is enabled
+- Hard limits (`.slice()`) now use `settings.maxTags` instead of hardcoded 5
+
 ## [2.0.3] - 2025-11-12
 
 ### 🐛 Fixed

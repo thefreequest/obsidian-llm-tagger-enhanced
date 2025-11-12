@@ -16,6 +16,16 @@ import {
 const ICON_NAME = 'llm-tagger-robot';
 const VIEW_TYPE = 'llm-tagger-view';
 
+// Literary genre tags for auto-detection
+const LITERARY_GENRES = [
+    'poesia', 'prosa_poetica', 'diario', 'ensayo', 'relato', 'cuento',
+    'microcuento', 'novela_corta', 'cronica', 'carta', 'epistolario',
+    'aforismo', 'nota', 'fragmento', 'memorias', 'autobiografia',
+    'biografia', 'testimonio', 'dialogo', 'monologo', 'teatro_breve',
+    'escena', 'guion', 'haiku', 'tanka', 'soneto', 'oda', 'elegia',
+    'satira', 'epigrama', 'romance'
+];
+
 interface LLMTaggerSettings {
     selectedModel: string | null;
     defaultTags: string[];
@@ -25,6 +35,9 @@ interface LLMTaggerSettings {
     ollamaUrl: string; // URL for the Ollama API server
     language: string; // Language for LLM summaries and tags
     customInstructions: string; // Custom instructions for the LLM
+    minTags: number; // Minimum number of tags to generate
+    maxTags: number; // Maximum number of tags to generate
+    detectLiteraryGenre: boolean; // Auto-detect literary genre
 }
 
 const DEFAULT_SETTINGS: LLMTaggerSettings = {
@@ -35,7 +48,10 @@ const DEFAULT_SETTINGS: LLMTaggerSettings = {
     excludePatterns: [],
     ollamaUrl: 'http://localhost:11434',
     language: 'English',
-    customInstructions: ''
+    customInstructions: '',
+    minTags: 3,
+    maxTags: 5,
+    detectLiteraryGenre: false
 }
 
 export default class LLMTaggerPlugin extends Plugin {
@@ -441,24 +457,51 @@ export default class LLMTaggerPlugin extends Plugin {
         // Deterministic tagging is disabled, LLM handles all selection
         const deterministicTags: string[] = [];
 
-        // Build the prompt with optional custom instructions
+        // Prepare available tags list (include literary genres if enabled)
+        let tagsForPrompt = availableTags;
+        if (this.settings.detectLiteraryGenre) {
+            // Add literary genres to available tags for this analysis
+            tagsForPrompt = [...new Set([...availableTags, ...LITERARY_GENRES])];
+        }
+
+        // Build the prompt with configurable tag count
         let prompt = `You are an expert at analyzing and tagging markdown documents.
 
 CRITICAL RULES:
-- You MUST select EXACTLY 3 to 5 tags maximum
+- You MUST select between ${this.settings.minTags} and ${this.settings.maxTags} tags
 - Select ONLY the MOST IMPORTANT themes
 - Do NOT list every tag that could apply
 - Do NOT add explanations or justifications after tags
 - Do NOT use parentheses or brackets with tags
-- Think: "What are the 3 CORE topics of this text?"
+- Think: "What are the ${this.settings.minTags}-${this.settings.maxTags} CORE topics of this text?"
 
-Available tags: ${availableTags.join(', ')}
+Available tags: ${tagsForPrompt.join(', ')}`;
+
+        // Add literary genre detection instructions if enabled
+        if (this.settings.detectLiteraryGenre) {
+            prompt += `
+
+LITERARY GENRE DETECTION:
+If this text is a creative/literary work, also identify its genre from these options:
+${LITERARY_GENRES.join(', ')}
+
+Include the genre tag along with the thematic tags.`;
+        }
+
+        prompt += `
 
 Your task:
 1. Read the content carefully
-2. Identify the 3-5 MOST IMPORTANT themes (not all possible themes)
-3. Write a brief 1-2 sentence summary in ${this.settings.language}
-4. Return ONLY the tag names without any explanations
+2. Identify the ${this.settings.minTags}-${this.settings.maxTags} MOST IMPORTANT themes (not all possible themes)`;
+
+        if (this.settings.detectLiteraryGenre) {
+            prompt += `
+3. If applicable, identify the literary genre`;
+        }
+
+        prompt += `
+${this.settings.detectLiteraryGenre ? '4' : '3'}. Write a brief 1-2 sentence summary in ${this.settings.language}
+${this.settings.detectLiteraryGenre ? '5' : '4'}. Return ONLY the tag names without any explanations
 
 IMPORTANT: Return tags EXACTLY as they appear in the available tags list.
 Do NOT add explanations like "tag (because reason)" or "tag [justification]".
@@ -515,6 +558,11 @@ Suggested tags: [tag1, tag2, tag3]`;
         }
 
         if (tagsMatch) {
+            // Validate tags against available tags + literary genres (if enabled)
+            const validTags = this.settings.detectLiteraryGenre
+                ? [...availableTags, ...LITERARY_GENRES]
+                : availableTags;
+
             llmTags = tagsMatch[1]
                 .split(',')
                 .map((tag: string) => {
@@ -526,16 +574,16 @@ Suggested tags: [tag1, tag2, tag3]`;
                     tag = tag.replace(/\s*\[[^\]]*\]/g, '').trim();
                     return tag;
                 })
-                .filter((tag: string) => tag && availableTags.includes(tag)) // Only keep valid tags
-                .slice(0, 5); // HARD LIMIT: Maximum 5 tags from LLM
+                .filter((tag: string) => tag && validTags.includes(tag)) // Only keep valid tags
+                .slice(0, this.settings.maxTags); // HARD LIMIT: Use configured max
         }
 
         // Combine deterministic and LLM tags, remove duplicates
         let allTags = [...new Set([...deterministicTags, ...llmTags])];
 
-        // ENFORCE maximum 5 tags total
-        if (allTags.length > 5) {
-            allTags = allTags.slice(0, 5);
+        // ENFORCE maximum tags as configured
+        if (allTags.length > this.settings.maxTags) {
+            allTags = allTags.slice(0, this.settings.maxTags);
         }
 
         // Build the final content with proper frontmatter
@@ -1304,6 +1352,50 @@ class LLMTaggerSettingTab extends PluginSettingTab {
                 text.inputEl.rows = 8;
                 text.inputEl.cols = 50;
             });
+
+        new Setting(containerEl)
+            .setName('Minimum tags')
+            .setDesc('Minimum number of tags to generate per document')
+            .addSlider(slider => slider
+                .setLimits(1, 10, 1)
+                .setValue(this.plugin.settings.minTags)
+                .setDynamicTooltip()
+                .onChange(async (value) => {
+                    this.plugin.settings.minTags = value;
+                    // Ensure min doesn't exceed max
+                    if (this.plugin.settings.minTags > this.plugin.settings.maxTags) {
+                        this.plugin.settings.maxTags = this.plugin.settings.minTags;
+                    }
+                    await this.plugin.saveSettings();
+                    this.display(); // Refresh display to update max slider if needed
+                }));
+
+        new Setting(containerEl)
+            .setName('Maximum tags')
+            .setDesc('Maximum number of tags to generate per document')
+            .addSlider(slider => slider
+                .setLimits(1, 10, 1)
+                .setValue(this.plugin.settings.maxTags)
+                .setDynamicTooltip()
+                .onChange(async (value) => {
+                    this.plugin.settings.maxTags = value;
+                    // Ensure max doesn't go below min
+                    if (this.plugin.settings.maxTags < this.plugin.settings.minTags) {
+                        this.plugin.settings.minTags = this.plugin.settings.maxTags;
+                    }
+                    await this.plugin.saveSettings();
+                    this.display(); // Refresh display to update min slider if needed
+                }));
+
+        new Setting(containerEl)
+            .setName('Detect literary genre')
+            .setDesc('Automatically detect and tag literary genres (poetry, diary, essay, short story, etc.)')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.detectLiteraryGenre)
+                .onChange(async (value) => {
+                    this.plugin.settings.detectLiteraryGenre = value;
+                    await this.plugin.saveSettings();
+                }));
 
         new Setting(containerEl)
             .setName('Default tags')
