@@ -5,6 +5,26 @@ All notable changes to the LLM Tagger Enhanced plugin will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.3] - 2025-11-12
+
+### 🐛 Fixed
+
+#### LLM Adding Explanations to Tags
+- **Fixed**: LLM was adding explanations in parentheses after each tag
+- **Problem**: Tags returned as "tag (explanation)" instead of clean "tag"
+  - Example: `amor (por la busca del placer)` instead of just `amor`
+  - Tags didn't match available tags list exactly
+  - Resulted in invalid/malformed tags
+- **Solution**:
+  - Added regex to strip parentheses and brackets from tags
+  - Added validation: only keep tags that match available tags list exactly
+  - Updated prompt with explicit instructions: "Do NOT add explanations or justifications"
+  - Added example of what NOT to do in prompt
+- **Impact**:
+  - Tags now clean and match available tags exactly
+  - Invalid tags automatically filtered out
+  - Proper tag indexing in Obsidian
+
 ## [2.0.2] - 2025-11-12
 
 ### 🐛 Fixed

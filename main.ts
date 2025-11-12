@@ -448,6 +448,8 @@ CRITICAL RULES:
 - You MUST select EXACTLY 3 to 5 tags maximum
 - Select ONLY the MOST IMPORTANT themes
 - Do NOT list every tag that could apply
+- Do NOT add explanations or justifications after tags
+- Do NOT use parentheses or brackets with tags
 - Think: "What are the 3 CORE topics of this text?"
 
 Available tags: ${availableTags.join(', ')}
@@ -456,7 +458,10 @@ Your task:
 1. Read the content carefully
 2. Identify the 3-5 MOST IMPORTANT themes (not all possible themes)
 3. Write a brief 1-2 sentence summary in ${this.settings.language}
-4. Return ONLY the most relevant tags
+4. Return ONLY the tag names without any explanations
+
+IMPORTANT: Return tags EXACTLY as they appear in the available tags list.
+Do NOT add explanations like "tag (because reason)" or "tag [justification]".
 
 Format your response EXACTLY like this:
 Summary: [your summary here]
@@ -512,8 +517,16 @@ Suggested tags: [tag1, tag2, tag3]`;
         if (tagsMatch) {
             llmTags = tagsMatch[1]
                 .split(',')
-                .map((tag: string) => tag.trim().replace(/^#/, ''))
-                .filter((tag: string) => tag)
+                .map((tag: string) => {
+                    // Remove # symbols
+                    tag = tag.trim().replace(/^#/, '');
+                    // Remove anything in parentheses (explanations)
+                    tag = tag.replace(/\s*\([^)]*\)/g, '').trim();
+                    // Remove anything in brackets (explanations)
+                    tag = tag.replace(/\s*\[[^\]]*\]/g, '').trim();
+                    return tag;
+                })
+                .filter((tag: string) => tag && availableTags.includes(tag)) // Only keep valid tags
                 .slice(0, 5); // HARD LIMIT: Maximum 5 tags from LLM
         }
 
