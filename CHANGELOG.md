@@ -5,6 +5,21 @@ All notable changes to the LLM Tagger Enhanced plugin will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.2] - 2025-11-12
+
+### 🔧 Changed
+
+#### Removed Redundant Configuration Modal
+- **Change**: Removed modal dialog that asked for tags/model when tagging
+- **Reason**: Modal was redundant - all settings already configured in settings page
+- **Before**: Tag document → Modal appears asking for model + tags
+- **After**: Tag document → Uses model + tags from settings directly
+- **Benefit**:
+  - Faster tagging workflow (one less click)
+  - Settings are centralized in one place
+  - No confusion about which configuration is being used
+- **Note**: If model or tags not configured, shows helpful notice directing user to settings
+
 ## [2.1.1] - 2025-11-12
 
 ### 🐛 Fixed

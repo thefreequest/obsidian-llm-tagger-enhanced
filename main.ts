@@ -429,11 +429,11 @@ export default class LLMTaggerPlugin extends Plugin {
                     return;
                 }
                 this.settings.selectedModel = modelSelect.value;
-                
+
                 // Parse and save the tags to settings
                 const tags = tagInput.split(',').map(tag => tag.trim()).filter(tag => tag);
                 this.settings.defaultTags = tags;
-                
+
                 this.saveSettings();
                 resolve(tags);
                 modal.close();
@@ -441,6 +441,24 @@ export default class LLMTaggerPlugin extends Plugin {
 
             modal.open();
         });
+    }
+
+    // Simplified method that uses settings directly
+    async getTagsFromSettings(): Promise<string[] | null> {
+        // Use tags from settings directly - no modal needed
+        // All configuration is done in the settings page
+
+        if (!this.settings.selectedModel) {
+            new Notice('Please select an Ollama model in settings first');
+            return null;
+        }
+
+        if (!this.settings.defaultTags || this.settings.defaultTags.length === 0) {
+            new Notice('Please configure default tags in settings first');
+            return null;
+        }
+
+        return this.settings.defaultTags;
     }
 
 
@@ -781,12 +799,12 @@ Suggested tags: [tag1, tag2, tag3]`;
 
     async addTagsToDocuments(view?: LLMTaggerView) {
         if (!this.settings.selectedModel) {
-            new Notice('Please select an Ollama model first');
+            new Notice('Please select an Ollama model in settings first');
             return;
         }
 
-        const tags = await this.getUserDefinedTags();
-        if (!tags) return; // User cancelled
+        const tags = await this.getTagsFromSettings();
+        if (!tags) return; // Missing configuration
 
         const files = this.app.vault.getMarkdownFiles();
         let processed = 0;
@@ -928,8 +946,8 @@ Suggested tags: [tag1, tag2, tag3]`;
             return;
         }
 
-        const tags = await this.getUserDefinedTags();
-        if (!tags) return; // User cancelled
+        const tags = await this.getTagsFromSettings();
+        if (!tags) return; // Missing configuration
 
         try {
             const initialContent = await this.app.vault.read(activeFile);
