@@ -59,6 +59,7 @@ export default class LLMTaggerPlugin extends Plugin {
     view: LLMTaggerView;
     private autoTaggingEnabled = false;
     private lastOpenFile: TFile | null = null;
+    private cancelBulkOperation = false; // Flag to cancel bulk operations
 
     async onload() {
         console.log('Loading LLM Tagger plugin');
@@ -806,38 +807,158 @@ Suggested tags: [tag1, tag2, tag3]`;
         const tags = await this.getTagsFromSettings();
         if (!tags) return; // Missing configuration
 
-        const files = this.app.vault.getMarkdownFiles();
+        const allFiles = this.app.vault.getMarkdownFiles();
+        const activeFile = this.app.workspace.getActiveFile();
+        const currentFolder = activeFile?.parent;
+
+        // Show confirmation modal with scope selection
+        const result = await new Promise<{ confirmed: boolean, scope: 'all' | 'folder' | null }>((resolve) => {
+            const modal = new Modal(this.app);
+            modal.titleEl.setText("Bulk Tagging - Select Scope");
+
+            const content = modal.contentEl.createDiv();
+            content.createEl('h4', { text: 'Choose which files to process:' });
+            content.style.marginTop = '10px';
+
+            // Option 1: All files
+            const option1 = content.createDiv();
+            option1.style.marginBottom = '15px';
+            option1.style.padding = '10px';
+            option1.style.border = '1px solid var(--background-modifier-border)';
+            option1.style.borderRadius = '5px';
+            option1.style.cursor = 'pointer';
+
+            const radio1 = option1.createEl('input', { type: 'radio' });
+            radio1.name = 'scope';
+            radio1.value = 'all';
+            radio1.checked = true;
+            radio1.style.marginRight = '10px';
+
+            const label1 = option1.createEl('label');
+            label1.style.cursor = 'pointer';
+            label1.innerHTML = `<strong>All files in vault</strong><br><small>${allFiles.length} markdown files</small>`;
+
+            option1.addEventListener('click', () => { radio1.checked = true; });
+
+            // Option 2: Current folder (if available)
+            if (currentFolder) {
+                const folderFiles = allFiles.filter(f => f.parent?.path === currentFolder.path);
+
+                const option2 = content.createDiv();
+                option2.style.marginBottom = '15px';
+                option2.style.padding = '10px';
+                option2.style.border = '1px solid var(--background-modifier-border)';
+                option2.style.borderRadius = '5px';
+                option2.style.cursor = 'pointer';
+
+                const radio2 = option2.createEl('input', { type: 'radio' });
+                radio2.name = 'scope';
+                radio2.value = 'folder';
+                radio2.style.marginRight = '10px';
+
+                const label2 = option2.createEl('label');
+                label2.style.cursor = 'pointer';
+                label2.innerHTML = `<strong>Current folder only</strong><br><small>"${currentFolder.path}" - ${folderFiles.length} files</small>`;
+
+                option2.addEventListener('click', () => { radio2.checked = true; });
+            }
+
+            content.createEl('p', {
+                text: 'Files already tagged will be skipped.',
+                cls: 'setting-item-description'
+            });
+
+            content.createEl('p', {
+                text: 'Note: This operation may take a while depending on the number of files and your LLM model speed.',
+                cls: 'mod-warning'
+            });
+
+            const buttonContainer = modal.contentEl.createDiv();
+            buttonContainer.addClass('button-container');
+            buttonContainer.style.marginTop = '20px';
+            buttonContainer.style.display = 'flex';
+            buttonContainer.style.gap = '10px';
+            buttonContainer.style.justifyContent = 'flex-end';
+
+            const cancelButton = buttonContainer.createEl('button', { text: 'Cancel' });
+            const confirmButton = buttonContainer.createEl('button', { text: 'Start Tagging', cls: 'mod-cta' });
+
+            cancelButton.addEventListener('click', () => {
+                resolve({ confirmed: false, scope: null });
+                modal.close();
+            });
+
+            confirmButton.addEventListener('click', () => {
+                const selectedScope = modal.contentEl.querySelector('input[name="scope"]:checked') as HTMLInputElement;
+                resolve({ confirmed: true, scope: (selectedScope?.value as 'all' | 'folder') || 'all' });
+                modal.close();
+            });
+
+            modal.open();
+        });
+
+        if (!result.confirmed) return;
+
+        // Filter files based on scope
+        let files = allFiles;
+        if (result.scope === 'folder' && currentFolder) {
+            files = allFiles.filter(f => f.parent?.path === currentFolder.path);
+        }
+
         let processed = 0;
         let modified = 0;
+        let skipped = 0;
+        this.cancelBulkOperation = false;
+
+        // Show start notice and enable cancel button
+        new Notice(`Starting bulk tagging of ${files.length} files...`, 4000);
+        if (view) {
+            view.showCancelButton();
+        }
 
         try {
             for (const file of files) {
+                // Check for cancellation
+                if (this.cancelBulkOperation) {
+                    new Notice(`⚠️ Bulk tagging cancelled. Tagged ${modified} of ${processed} processed files.`, 5000);
+                    break;
+                }
+
                 processed++;
                 if (view) {
-                    view.updateProgress(processed, files.length, file.basename);
+                    view.updateProgress(processed, files.length, file.basename, modified, skipped);
                 }
 
                 // Skip if file hasn't been modified since last tagging
                 if (!this.shouldProcessFile(file)) {
                     console.log(`Skipping ${file.basename} - already tagged and not modified`);
+                    skipped++;
                     continue;
                 }
 
                 try {
                     const initialContent = await this.app.vault.read(file);
-                    
+
                     // Skip if already tagged
                     if (this.isAlreadyTagged(initialContent)) {
                         console.log(`Skipping ${file.basename} - already has tag metadata`);
+                        skipped++;
                         continue;
                     }
-                    
+
                     const taggedContent = await this.processContentWithOllama(initialContent, tags);
+
+                    // Check for cancellation again after LLM processing
+                    if (this.cancelBulkOperation) {
+                        new Notice(`⚠️ Bulk tagging cancelled. Tagged ${modified} of ${processed} processed files.`, 5000);
+                        break;
+                    }
 
                     // Verify file hasn't been modified while waiting for Ollama
                     const currentContent = await this.app.vault.read(file);
                     if (currentContent !== initialContent) {
                         console.log(`Skipping ${file.basename} - content changed while processing`);
+                        skipped++;
                         continue;
                     }
 
@@ -847,7 +968,6 @@ Suggested tags: [tag1, tag2, tag3]`;
                         this.settings.taggedFiles[file.path] = Date.now();
                         await this.saveSettings();
                         modified++;
-                        new Notice(`Tagged: ${file.basename}`);
                     }
                 } catch (error) {
                     console.error(`Error processing ${file.basename}:`, error);
@@ -855,64 +975,161 @@ Suggested tags: [tag1, tag2, tag3]`;
                 }
             }
 
-            new Notice(`Completed! Tagged ${modified} of ${files.length} files`);
+            if (!this.cancelBulkOperation) {
+                new Notice(`✓ Bulk tagging completed! Successfully tagged ${modified} files (${skipped} skipped, ${files.length} total)`, 5000);
+            }
         } finally {
+            this.cancelBulkOperation = false;
             if (view) {
                 view.resetProgress();
+                view.hideCancelButton();
             }
         }
     }
+
+    cancelBulkOperations() {
+        this.cancelBulkOperation = true;
+    }
     
     async untagAllDocuments(view?: LLMTaggerView) {
-        // Confirm before proceeding
-        const confirmed = await new Promise<boolean>((resolve) => {
+        const allFiles = this.app.vault.getMarkdownFiles();
+        const activeFile = this.app.workspace.getActiveFile();
+        const currentFolder = activeFile?.parent;
+
+        // Confirm before proceeding with scope selection
+        const result = await new Promise<{ confirmed: boolean, scope: 'all' | 'folder' | null }>((resolve) => {
             const modal = new Modal(this.app);
-            modal.titleEl.setText("Confirm Untag All");
-            
+            modal.titleEl.setText("Bulk Untagging - Select Scope");
+
             const content = modal.contentEl.createDiv();
-            content.setText("This will remove all tags and summaries added by LLM Tagger from your documents. This action cannot be undone. Are you sure you want to proceed?");
-            
+            content.createEl('h4', { text: 'Choose which files to process:' });
+            content.style.marginTop = '10px';
+
+            // Option 1: All files
+            const option1 = content.createDiv();
+            option1.style.marginBottom = '15px';
+            option1.style.padding = '10px';
+            option1.style.border = '1px solid var(--background-modifier-border)';
+            option1.style.borderRadius = '5px';
+            option1.style.cursor = 'pointer';
+
+            const radio1 = option1.createEl('input', { type: 'radio' });
+            radio1.name = 'scope';
+            radio1.value = 'all';
+            radio1.checked = true;
+            radio1.style.marginRight = '10px';
+
+            const label1 = option1.createEl('label');
+            label1.style.cursor = 'pointer';
+            label1.innerHTML = `<strong>All files in vault</strong><br><small>${allFiles.length} markdown files</small>`;
+
+            option1.addEventListener('click', () => { radio1.checked = true; });
+
+            // Option 2: Current folder (if available)
+            if (currentFolder) {
+                const folderFiles = allFiles.filter(f => f.parent?.path === currentFolder.path);
+
+                const option2 = content.createDiv();
+                option2.style.marginBottom = '15px';
+                option2.style.padding = '10px';
+                option2.style.border = '1px solid var(--background-modifier-border)';
+                option2.style.borderRadius = '5px';
+                option2.style.cursor = 'pointer';
+
+                const radio2 = option2.createEl('input', { type: 'radio' });
+                radio2.name = 'scope';
+                radio2.value = 'folder';
+                radio2.style.marginRight = '10px';
+
+                const label2 = option2.createEl('label');
+                label2.style.cursor = 'pointer';
+                label2.innerHTML = `<strong>Current folder only</strong><br><small>"${currentFolder.path}" - ${folderFiles.length} files</small>`;
+
+                option2.addEventListener('click', () => { radio2.checked = true; });
+            }
+
+            content.createEl('p', {
+                text: 'Only files with LLM Tagger tags will be modified.',
+                cls: 'setting-item-description'
+            });
+
+            content.createEl('p', {
+                text: 'This will remove all tags and summaries added by LLM Tagger. This action cannot be undone.',
+                cls: 'mod-warning'
+            });
+
             const buttonContainer = modal.contentEl.createDiv();
             buttonContainer.addClass('button-container');
-            
+            buttonContainer.style.marginTop = '20px';
+            buttonContainer.style.display = 'flex';
+            buttonContainer.style.gap = '10px';
+            buttonContainer.style.justifyContent = 'flex-end';
+
             const cancelButton = buttonContainer.createEl('button', { text: 'Cancel' });
-            const confirmButton = buttonContainer.createEl('button', { text: 'Untag All', cls: 'mod-warning' });
-            
+            const confirmButton = buttonContainer.createEl('button', { text: 'Start Untagging', cls: 'mod-warning' });
+
             cancelButton.addEventListener('click', () => {
-                resolve(false);
+                resolve({ confirmed: false, scope: null });
                 modal.close();
             });
-            
+
             confirmButton.addEventListener('click', () => {
-                resolve(true);
+                const selectedScope = modal.contentEl.querySelector('input[name="scope"]:checked') as HTMLInputElement;
+                resolve({ confirmed: true, scope: (selectedScope?.value as 'all' | 'folder') || 'all' });
                 modal.close();
             });
-            
+
             modal.open();
         });
-        
-        if (!confirmed) return;
-        
-        const files = this.app.vault.getMarkdownFiles();
+
+        if (!result.confirmed) return;
+
+        // Filter files based on scope
+        let files = allFiles;
+        if (result.scope === 'folder' && currentFolder) {
+            files = allFiles.filter(f => f.parent?.path === currentFolder.path);
+        }
+
         let processed = 0;
         let modified = 0;
-        
+        let skipped = 0;
+        this.cancelBulkOperation = false;
+
+        // Show start notice and enable cancel button
+        new Notice(`Starting bulk untagging of ${files.length} files...`, 4000);
+        if (view) {
+            view.showCancelButton();
+        }
+
         try {
             for (const file of files) {
+                // Check for cancellation
+                if (this.cancelBulkOperation) {
+                    new Notice(`⚠️ Bulk untagging cancelled. Untagged ${modified} of ${processed} processed files.`, 5000);
+                    break;
+                }
+
                 processed++;
                 if (view) {
-                    view.updateProgress(processed, files.length, `Untagging: ${file.basename}`);
+                    view.updateProgress(processed, files.length, file.basename, modified, skipped);
                 }
-                
+
                 try {
                     const content = await this.app.vault.read(file);
 
                     // Check if the file has LLM Tagger tags
                     if (!this.isAlreadyTagged(content)) {
+                        skipped++;
                         continue; // Skip files without LLM tags
                     }
 
                     const cleanedContent = this.removeLLMTagsFromContent(content);
+
+                    // Check for cancellation after processing
+                    if (this.cancelBulkOperation) {
+                        new Notice(`⚠️ Bulk untagging cancelled. Untagged ${modified} of ${processed} processed files.`, 5000);
+                        break;
+                    }
 
                     // Update the file if content changed
                     if (cleanedContent !== content) {
@@ -921,20 +1138,26 @@ Suggested tags: [tag1, tag2, tag3]`;
 
                         // Remove from tagged files record
                         delete this.settings.taggedFiles[file.path];
+                    } else {
+                        skipped++;
                     }
                 } catch (error) {
                     console.error(`Error untagging ${file.basename}:`, error);
                     new Notice(`Failed to untag ${file.basename}: ${error.message}`);
                 }
             }
-            
+
             // Save the updated tagged files record
             await this.saveSettings();
-            
-            new Notice(`Completed! Untagged ${modified} of ${files.length} files`);
+
+            if (!this.cancelBulkOperation) {
+                new Notice(`✓ Bulk untagging completed! Successfully untagged ${modified} files (${skipped} skipped, ${files.length} total)`, 5000);
+            }
         } finally {
+            this.cancelBulkOperation = false;
             if (view) {
                 view.resetProgress();
+                view.hideCancelButton();
             }
         }
     }
@@ -949,21 +1172,26 @@ Suggested tags: [tag1, tag2, tag3]`;
         const tags = await this.getTagsFromSettings();
         if (!tags) return; // Missing configuration
 
+        // Show progress notice
+        const progressNotice = new Notice(`Tagging "${activeFile.basename}"...`, 0); // 0 = don't auto-dismiss
+
         try {
             const initialContent = await this.app.vault.read(activeFile);
-            
+
             // Skip if already tagged
             if (this.isAlreadyTagged(initialContent)) {
-                console.log(`Skipping ${activeFile.basename} - already has tag metadata`);
+                progressNotice.hide();
+                new Notice(`"${activeFile.basename}" is already tagged`);
                 return;
             }
-            
+
             const taggedContent = await this.processContentWithOllama(initialContent, tags);
 
             // Verify file hasn't been modified while waiting for Ollama
             const currentContent = await this.app.vault.read(activeFile);
             if (currentContent !== initialContent) {
-                console.log(`Skipping ${activeFile.basename} - content changed while processing`);
+                progressNotice.hide();
+                new Notice(`Skipped "${activeFile.basename}" - content changed during tagging`);
                 return;
             }
 
@@ -972,11 +1200,16 @@ Suggested tags: [tag1, tag2, tag3]`;
                 await this.app.vault.modify(activeFile, taggedContent);
                 this.settings.taggedFiles[activeFile.path] = Date.now();
                 await this.saveSettings();
-                new Notice(`Tagged: ${activeFile.basename}`);
+                progressNotice.hide();
+                new Notice(`✓ Successfully tagged "${activeFile.basename}"`, 3000);
+            } else {
+                progressNotice.hide();
+                new Notice(`No tags added to "${activeFile.basename}"`);
             }
         } catch (error) {
+            progressNotice.hide();
             console.error(`Error tagging ${activeFile.basename}:`, error);
-            new Notice(`Failed to tag ${activeFile.basename}: ${error.message}`);
+            new Notice(`✗ Failed to tag "${activeFile.basename}": ${error.message}`, 5000);
         }
     }
 
@@ -987,12 +1220,16 @@ Suggested tags: [tag1, tag2, tag3]`;
             return;
         }
 
+        // Show progress notice
+        const progressNotice = new Notice(`Removing tags from "${activeFile.basename}"...`, 0);
+
         try {
             const content = await this.app.vault.read(activeFile);
 
             // Check if the file has LLM Tagger tags
             if (!this.isAlreadyTagged(content)) {
-                new Notice('This file has no LLM tags to remove');
+                progressNotice.hide();
+                new Notice(`"${activeFile.basename}" has no LLM tags to remove`);
                 return;
             }
 
@@ -1005,13 +1242,16 @@ Suggested tags: [tag1, tag2, tag3]`;
                 // Remove from tagged files record
                 delete this.settings.taggedFiles[activeFile.path];
                 await this.saveSettings();
-                new Notice(`Untagged: ${activeFile.basename}`);
+                progressNotice.hide();
+                new Notice(`✓ Successfully removed tags from "${activeFile.basename}"`, 3000);
             } else {
-                new Notice('No changes made');
+                progressNotice.hide();
+                new Notice(`No changes made to "${activeFile.basename}"`);
             }
         } catch (error) {
+            progressNotice.hide();
             console.error(`Error untagging ${activeFile.basename}:`, error);
-            new Notice(`Failed to untag ${activeFile.basename}: ${error.message}`);
+            new Notice(`✗ Failed to untag "${activeFile.basename}": ${error.message}`, 5000);
         }
     }
 
@@ -1021,6 +1261,7 @@ class LLMTaggerView extends ItemView {
     plugin: LLMTaggerPlugin;
     progressBar: HTMLProgressElement;
     progressText: HTMLDivElement;
+    cancelButton: HTMLButtonElement;
 
     constructor(leaf: WorkspaceLeaf, plugin: LLMTaggerPlugin) {
         super(leaf);
@@ -1104,17 +1345,36 @@ class LLMTaggerView extends ItemView {
         // Progress section
         const progressContainer = container.createDiv();
         progressContainer.createEl('h3', { text: 'Progress' });
-        
+
         // Create progress bar
         this.progressBar = progressContainer.createEl('progress');
         this.progressBar.addClass('progress-bar');
         this.progressBar.setAttribute('value', '0');
         this.progressBar.setAttribute('max', '100');
 
+        // Progress text and cancel button container
+        const progressControlsDiv = progressContainer.createDiv();
+        progressControlsDiv.style.display = 'flex';
+        progressControlsDiv.style.justifyContent = 'space-between';
+        progressControlsDiv.style.alignItems = 'center';
+        progressControlsDiv.style.marginTop = '8px';
+
         // Progress text
-        this.progressText = progressContainer.createDiv();
+        this.progressText = progressControlsDiv.createDiv();
         this.progressText.addClass('progress-text');
         this.progressText.textContent = 'Ready to tag documents';
+
+        // Cancel button (hidden by default)
+        this.cancelButton = progressControlsDiv.createEl('button', {
+            text: 'Cancel',
+            cls: 'mod-warning'
+        });
+        this.cancelButton.style.display = 'none';
+        this.cancelButton.addEventListener('click', () => {
+            this.plugin.cancelBulkOperations();
+            this.cancelButton.disabled = true;
+            this.cancelButton.textContent = 'Cancelling...';
+        });
 
         // Buttons container for bulk operations
         const bulkButtonsContainer = container.createDiv();
@@ -1239,15 +1499,31 @@ class LLMTaggerView extends ItemView {
         });
     }
 
-    updateProgress(current: number, total: number, filename: string) {
+    updateProgress(current: number, total: number, filename: string, modified: number = 0, skipped: number = 0) {
         const percentage = Math.round((current / total) * 100);
         this.progressBar.setAttribute('value', percentage.toString());
-        this.progressText.textContent = `Processing ${filename} (${current}/${total})`;
+
+        // Show detailed progress with counts
+        this.progressText.textContent = `Processing: ${filename}\n${current}/${total} files | Tagged: ${modified} | Skipped: ${skipped}`;
+        this.progressText.style.whiteSpace = 'pre-line'; // Allow line breaks
     }
 
     resetProgress() {
         this.progressBar.setAttribute('value', '0');
         this.progressText.textContent = 'Ready to tag documents';
+        this.progressText.style.whiteSpace = 'normal';
+    }
+
+    showCancelButton() {
+        this.cancelButton.style.display = 'block';
+        this.cancelButton.disabled = false;
+        this.cancelButton.textContent = 'Cancel';
+    }
+
+    hideCancelButton() {
+        this.cancelButton.style.display = 'none';
+        this.cancelButton.disabled = false;
+        this.cancelButton.textContent = 'Cancel';
     }
 }
 

@@ -5,6 +5,58 @@ All notable changes to the LLM Tagger Enhanced plugin will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.3] - 2025-11-13
+
+### ✨ Added
+
+#### Visual Feedback for All Tagging Operations
+- **Feature**: Added comprehensive progress indicators for all tagging/untagging operations
+- **Implementation**:
+  - Single document tagging: Shows persistent "Tagging..." notice during operation
+  - Single document untagging: Shows persistent "Removing tags from..." notice during operation
+  - Bulk tagging: Shows start notice "Starting bulk tagging of N documents..."
+  - Bulk untagging: Shows start notice "Starting bulk untagging of N documents..."
+  - All operations show completion notices with checkmarks (✓) and file counts
+  - Error notices with X symbol (✗) for failures
+  - Progress notices are non-dismissible until operation completes
+- **Benefit**: Users now have immediate feedback and know operations are in progress
+- **UX Impact**: Eliminates confusion during long-running LLM operations
+
+#### Enhanced Bulk Operations UX
+- **Feature**: Complete overhaul of bulk tagging/untagging user experience
+- **Implementation**:
+  - **Scope Selection**: Before starting, users choose what to process
+    - Option 1: "All files in vault" - Shows total count (e.g., "125 markdown files")
+    - Option 2: "Current folder only" - Shows folder path and file count (e.g., "Notes/Work - 23 files")
+    - Radio button selection with clear file counts
+    - Automatically detects current folder from active file
+    - Falls back to vault-wide if no folder context
+  - **Confirmation Modals**: Shows clear scope information
+    - Displays total number of files that will be processed
+    - Explains which files will be skipped (already tagged files)
+    - Warning about operation duration
+    - Professional modal design with proper button layout
+  - **Real-time Progress Updates**: Progress bar now updates in real-time
+    - Shows current file being processed
+    - Displays counts: processed/total files
+    - Shows tagged count and skipped count separately
+    - Example: "Processing: document.md\n15/100 files | Tagged: 8 | Skipped: 7"
+  - **Cancel Button**: Added cancellable bulk operations
+    - Cancel button appears next to progress bar during operations
+    - Click to cancel - stops after current file completes
+    - Shows "Cancelling..." feedback
+    - Reports partial results: "Tagged X of Y processed files"
+  - **Detailed Completion Messages**:
+    - Success: "✓ Bulk tagging completed! Successfully tagged X files (Y skipped, Z total)"
+    - Cancelled: "⚠️ Bulk tagging cancelled. Tagged X of Y processed files"
+- **Benefit**: Users now have complete visibility and control over bulk operations
+- **UX Impact**:
+  - Clear expectations before starting operations
+  - Ability to scope operations to specific folders
+  - Ability to cancel long-running operations
+  - Real-time feedback during processing
+  - Detailed statistics on completion
+
 ## [2.1.2] - 2025-11-12
 
 ### 🔧 Changed
