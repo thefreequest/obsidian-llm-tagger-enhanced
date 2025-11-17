@@ -571,7 +571,7 @@ Do NOT add explanations like "tag (because reason)" or "tag [justification]".
 
 Format your response EXACTLY like this:
 Summary: [your summary here]
-Suggested tags: ${this.settings.detectLiteraryGenre ? 'genre_tag, ' : ''}tag1, tag2, tag3`;
+Suggested tags: ${this.settings.detectLiteraryGenre ? 'genre_tag, ' : ''}${Array.from({length: this.settings.minTags}, (_, i) => `tag${i+1}`).join(', ')}`;
 
         // Add custom instructions if provided
         if (this.settings.customInstructions) {
