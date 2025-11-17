@@ -368,10 +368,11 @@ export default class LLMTaggerPlugin extends Plugin {
                 new Notice(`⚠️ Ollama URL should include http:// or https://\nAuto-corrected to: ${url}`, 8000);
             }
 
-            console.log(`Fetching Ollama models from: ${url}/api/tags`);
+            // Debug logging for troubleshooting (commented out for production)
+            // console.log(`Fetching Ollama models from: ${url}/api/tags`);
             const response = await fetch(`${url}/api/tags`);
 
-            console.log(`Ollama response status: ${response.status} ${response.statusText}`);
+            // console.log(`Ollama response status: ${response.status} ${response.statusText}`);
 
             if (!response.ok) {
                 const errorText = await response.text();
@@ -380,7 +381,7 @@ export default class LLMTaggerPlugin extends Plugin {
             }
 
             const data = await response.json();
-            console.log(`Ollama API returned data:`, data);
+            // console.log(`Ollama API returned data:`, data);
 
             if (!data.models || !Array.isArray(data.models)) {
                 console.error('Unexpected Ollama API response:', data);
@@ -388,25 +389,16 @@ export default class LLMTaggerPlugin extends Plugin {
             }
 
             const modelNames = data.models.map((model: any) => model.name);
-            console.log(`Successfully loaded ${modelNames.length} models:`, modelNames);
+            // console.log(`Successfully loaded ${modelNames.length} models:`, modelNames);
             return modelNames;
         } catch (error) {
-            console.error('Failed to fetch Ollama models - Full error:', error);
-            console.error('Error type:', error.constructor.name);
-            console.error('Error message:', error.message);
+            console.error('Failed to fetch Ollama models:', error);
 
-            // Show user-friendly error notice with more details
-            const normalizedUrl = this.normalizeOllamaUrl(this.settings.ollamaUrl);
-            if (error instanceof TypeError) {
-                if (error.message.toLowerCase().includes('cors')) {
-                    new Notice(`❌ CORS Error: Ollama server is blocking requests from Obsidian.\n\nFix: On your Ubuntu laptop, set:\nexport OLLAMA_ORIGINS="*"\n\nThen restart Ollama:\nsudo systemctl restart ollama`, 15000);
-                } else if (error.message.includes('fetch')) {
-                    new Notice(`❌ Cannot connect to Ollama at ${normalizedUrl}\n\nCheck:\n1. Ollama is running on Ubuntu\n2. URL is correct\n3. Network/Tailscale is connected\n4. OLLAMA_HOST=0.0.0.0:11434\n5. OLLAMA_ORIGINS=*`, 12000);
-                } else {
-                    new Notice(`❌ Network error: ${error.message}\n\nCheck console for details (Settings → About → Show debug info)`, 10000);
-                }
+            // Simplified error notice
+            if (error instanceof TypeError && error.message.includes('fetch')) {
+                new Notice(`Cannot connect to Ollama. Check:\n1. Ollama is running\n2. URL is correct: ${this.settings.ollamaUrl}`, 8000);
             } else {
-                new Notice(`❌ Failed to load models: ${error.message}\n\nCheck console for details`, 8000);
+                new Notice(`Failed to load models: ${error.message}`, 8000);
             }
             return [];
         }
@@ -659,11 +651,21 @@ Suggested tags: [tag1, tag2, tag3]`;
         // Combine deterministic and LLM tags, remove duplicates
         let allTags = [...new Set([...deterministicTags, ...llmTags])];
 
-        // ENFORCE maximum tags as configured (allow +1 for genre if enabled)
+        // ENFORCE minimum and maximum tags as configured (allow +1 for genre if enabled)
+        const effectiveMin = this.settings.minTags;
         const effectiveMax = this.settings.detectLiteraryGenre
             ? this.settings.maxTags + 1
             : this.settings.maxTags;
 
+        // Check minimum tags requirement
+        if (allTags.length < effectiveMin) {
+            console.warn(`LLM returned ${allTags.length} tags, but minimum is ${effectiveMin}. Tags: ${allTags.join(', ')}`);
+            new Notice(`⚠️ LLM returned only ${allTags.length} tags (minimum: ${effectiveMin}). Try regenerating or adjust minimum in settings.`, 6000);
+            // Don't tag the document if minimum not met
+            return content;
+        }
+
+        // Enforce maximum tags
         if (allTags.length > effectiveMax) {
             allTags = allTags.slice(0, effectiveMax);
         }
