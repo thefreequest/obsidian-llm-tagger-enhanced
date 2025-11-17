@@ -627,7 +627,7 @@ Suggested tags: [tag1, tag2, tag3]`;
                 ? [...availableTags, ...LITERARY_GENRES]
                 : availableTags;
 
-            const cleanedTags = tagsMatch[1]
+            const rawTags = tagsMatch[1]
                 .split(',')
                 .map((tag: string) => {
                     // Remove # symbols
@@ -638,7 +638,17 @@ Suggested tags: [tag1, tag2, tag3]`;
                     tag = tag.replace(/\s*\[[^\]]*\]/g, '').trim();
                     return tag;
                 })
-                .filter((tag: string) => tag && validTags.includes(tag)); // Only keep valid tags
+                .filter((tag: string) => tag); // Remove empty strings
+
+            console.log(`LLM suggested ${rawTags.length} tags:`, rawTags);
+
+            const cleanedTags = rawTags.filter((tag: string) => validTags.includes(tag));
+
+            if (cleanedTags.length < rawTags.length) {
+                const rejected = rawTags.filter((tag: string) => !validTags.includes(tag));
+                console.warn(`⚠️ LLM returned ${rejected.length} invalid tags (not in available tags list):`, rejected);
+                console.warn(`Valid tags returned:`, cleanedTags);
+            }
 
             // When genre detection is enabled, allow maxTags + 1 to accommodate genre tag
             const effectiveMax = this.settings.detectLiteraryGenre
@@ -651,23 +661,19 @@ Suggested tags: [tag1, tag2, tag3]`;
         // Combine deterministic and LLM tags, remove duplicates
         let allTags = [...new Set([...deterministicTags, ...llmTags])];
 
-        // ENFORCE minimum and maximum tags as configured (allow +1 for genre if enabled)
-        const effectiveMin = this.settings.minTags;
+        // ENFORCE maximum tags as configured (allow +1 for genre if enabled)
         const effectiveMax = this.settings.detectLiteraryGenre
             ? this.settings.maxTags + 1
             : this.settings.maxTags;
 
-        // Check minimum tags requirement
-        if (allTags.length < effectiveMin) {
-            console.warn(`LLM returned ${allTags.length} tags, but minimum is ${effectiveMin}. Tags: ${allTags.join(', ')}`);
-            new Notice(`⚠️ LLM returned only ${allTags.length} tags (minimum: ${effectiveMin}). Try regenerating or adjust minimum in settings.`, 6000);
-            // Don't tag the document if minimum not met
-            return content;
-        }
-
-        // Enforce maximum tags
         if (allTags.length > effectiveMax) {
             allTags = allTags.slice(0, effectiveMax);
+        }
+
+        // Log warning if LLM returns fewer tags than minimum (helps diagnose prompt issues)
+        if (allTags.length < this.settings.minTags) {
+            console.warn(`⚠️ LLM returned ${allTags.length} tags but minimum is ${this.settings.minTags}. Tags: ${allTags.join(', ')}`);
+            console.warn(`This may indicate the LLM is not following instructions. Check prompt or try different model.`);
         }
 
         // Build the final content with proper frontmatter
