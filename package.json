@@ -1,6 +1,6 @@
 {
   "name": "obsidian-llm-tagger-enhanced",
-  "version": "2.1.4",
+  "version": "2.1.5",
   "description": "Enhanced Obsidian plugin for automatic tagging using Ollama LLMs with multi-language support",
   "main": "main.js",
   "scripts": {

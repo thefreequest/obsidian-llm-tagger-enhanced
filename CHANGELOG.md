@@ -13,6 +13,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### 📋 Planned
 - See [TODO.md](TODO.md) for planned features and improvements
 
+## [2.1.5] - 2025-11-17
+
+### 🐛 Fixed
+
+#### Critical Prompt Engineering Fix: Dynamic Tag Example
+- **Problem**: LLM was consistently returning exactly 3 tags regardless of minTags setting
+  - User sets minTags=4, maxTags=10
+  - LLM returns exactly 3 tags every time
+  - Tags were valid, just wrong count
+- **Root Cause**: Prompt example contradicted instructions
+  - Instruction: "You MUST select between 4 and 10 tags"
+  - Example: `Suggested tags: tag1, tag2, tag3` (showing 3 tags!)
+  - LLMs prioritize concrete examples over abstract instructions
+  - Mistral followed the example, ignoring the instruction
+- **Fix**: Made format example dynamic based on minTags setting
+  - Before: `tag1, tag2, tag3` (always 3)
+  - After: `tag1, tag2, tag3, tag4` (when minTags=4)
+  - Example now generates: `Array.from({length: minTags}, (_, i) => tag${i+1})`
+  - Example reinforces instruction instead of contradicting it
+- **Impact**: LLM now consistently returns correct number of tags
+- **Documentation**: Added [PROMPT_ENGINEERING.md](PROMPT_ENGINEERING.md) with lessons learned
+
+#### Enhanced Diagnostic Logging
+- Added comprehensive logging to diagnose LLM behavior issues
+- Logs prompt parameters (model, min/max tags, available tags count)
+- Logs raw LLM response before parsing
+- Logs tag filtering process (suggested vs accepted)
+- Warns when LLM returns tags not in available list
+- Warns when final count doesn't meet minimum
+- Helps identify prompt engineering issues quickly
+
 ## [2.1.4] - 2025-11-17
 
 ### ✨ Added
