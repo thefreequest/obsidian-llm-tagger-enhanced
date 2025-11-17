@@ -348,9 +348,27 @@ export default class LLMTaggerPlugin extends Plugin {
         }
     }
 
+    // Helper method to ensure URL has proper protocol
+    private normalizeOllamaUrl(url: string): string {
+        url = url.trim();
+        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+            return `http://${url}`;
+        }
+        return url;
+    }
+
     async getOllamaModels(): Promise<string[]> {
         try {
-            const response = await fetch(`${this.settings.ollamaUrl}/api/tags`);
+            // Normalize URL (adds http:// if missing)
+            const url = this.normalizeOllamaUrl(this.settings.ollamaUrl);
+
+            // Warn user if protocol was missing
+            if (url !== this.settings.ollamaUrl) {
+                console.warn(`Ollama URL missing protocol, auto-corrected: ${this.settings.ollamaUrl} -> ${url}`);
+                new Notice(`⚠️ Ollama URL should include http:// or https://\nAuto-corrected to: ${url}`, 8000);
+            }
+
+            const response = await fetch(`${url}/api/tags`);
 
             if (!response.ok) {
                 const errorText = await response.text();
@@ -370,7 +388,7 @@ export default class LLMTaggerPlugin extends Plugin {
             console.error('Failed to fetch Ollama models:', error);
             // Show user-friendly error notice
             if (error instanceof TypeError && error.message.includes('fetch')) {
-                new Notice(`Cannot connect to Ollama at ${this.settings.ollamaUrl}. Check:\n1. Ollama is running\n2. URL is correct\n3. OLLAMA_ORIGINS includes your domain`, 10000);
+                new Notice(`Cannot connect to Ollama at ${this.settings.ollamaUrl}.\n\nCheck:\n1. URL includes http:// or https://\n2. Ollama is running\n3. URL is correct\n4. OLLAMA_ORIGINS is configured`, 10000);
             } else {
                 new Notice(`Failed to load models: ${error.message}`, 8000);
             }
@@ -565,7 +583,8 @@ Summary: [your summary here]
 Suggested tags: [tag1, tag2, tag3]`;
 
         // Get tag suggestions and summary from Ollama
-        const response = await fetch(`${this.settings.ollamaUrl}/api/generate`, {
+        const url = this.normalizeOllamaUrl(this.settings.ollamaUrl);
+        const response = await fetch(`${url}/api/generate`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
