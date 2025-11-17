@@ -351,10 +351,29 @@ export default class LLMTaggerPlugin extends Plugin {
     async getOllamaModels(): Promise<string[]> {
         try {
             const response = await fetch(`${this.settings.ollamaUrl}/api/tags`);
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error(`Ollama API error (${response.status}):`, errorText);
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
             const data = await response.json();
-            return data.models?.map((model: any) => model.name) || [];
+
+            if (!data.models || !Array.isArray(data.models)) {
+                console.error('Unexpected Ollama API response:', data);
+                throw new Error('Invalid response format from Ollama');
+            }
+
+            return data.models.map((model: any) => model.name);
         } catch (error) {
             console.error('Failed to fetch Ollama models:', error);
+            // Show user-friendly error notice
+            if (error instanceof TypeError && error.message.includes('fetch')) {
+                new Notice(`Cannot connect to Ollama at ${this.settings.ollamaUrl}. Check:\n1. Ollama is running\n2. URL is correct\n3. OLLAMA_ORIGINS includes your domain`, 10000);
+            } else {
+                new Notice(`Failed to load models: ${error.message}`, 8000);
+            }
             return [];
         }
     }
