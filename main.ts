@@ -368,7 +368,10 @@ export default class LLMTaggerPlugin extends Plugin {
                 new Notice(`⚠️ Ollama URL should include http:// or https://\nAuto-corrected to: ${url}`, 8000);
             }
 
+            console.log(`Fetching Ollama models from: ${url}/api/tags`);
             const response = await fetch(`${url}/api/tags`);
+
+            console.log(`Ollama response status: ${response.status} ${response.statusText}`);
 
             if (!response.ok) {
                 const errorText = await response.text();
@@ -377,20 +380,33 @@ export default class LLMTaggerPlugin extends Plugin {
             }
 
             const data = await response.json();
+            console.log(`Ollama API returned data:`, data);
 
             if (!data.models || !Array.isArray(data.models)) {
                 console.error('Unexpected Ollama API response:', data);
                 throw new Error('Invalid response format from Ollama');
             }
 
-            return data.models.map((model: any) => model.name);
+            const modelNames = data.models.map((model: any) => model.name);
+            console.log(`Successfully loaded ${modelNames.length} models:`, modelNames);
+            return modelNames;
         } catch (error) {
-            console.error('Failed to fetch Ollama models:', error);
-            // Show user-friendly error notice
-            if (error instanceof TypeError && error.message.includes('fetch')) {
-                new Notice(`Cannot connect to Ollama at ${this.settings.ollamaUrl}.\n\nCheck:\n1. URL includes http:// or https://\n2. Ollama is running\n3. URL is correct\n4. OLLAMA_ORIGINS is configured`, 10000);
+            console.error('Failed to fetch Ollama models - Full error:', error);
+            console.error('Error type:', error.constructor.name);
+            console.error('Error message:', error.message);
+
+            // Show user-friendly error notice with more details
+            const normalizedUrl = this.normalizeOllamaUrl(this.settings.ollamaUrl);
+            if (error instanceof TypeError) {
+                if (error.message.toLowerCase().includes('cors')) {
+                    new Notice(`❌ CORS Error: Ollama server is blocking requests from Obsidian.\n\nFix: On your Ubuntu laptop, set:\nexport OLLAMA_ORIGINS="*"\n\nThen restart Ollama:\nsudo systemctl restart ollama`, 15000);
+                } else if (error.message.includes('fetch')) {
+                    new Notice(`❌ Cannot connect to Ollama at ${normalizedUrl}\n\nCheck:\n1. Ollama is running on Ubuntu\n2. URL is correct\n3. Network/Tailscale is connected\n4. OLLAMA_HOST=0.0.0.0:11434\n5. OLLAMA_ORIGINS=*`, 12000);
+                } else {
+                    new Notice(`❌ Network error: ${error.message}\n\nCheck console for details (Settings → About → Show debug info)`, 10000);
+                }
             } else {
-                new Notice(`Failed to load models: ${error.message}`, 8000);
+                new Notice(`❌ Failed to load models: ${error.message}\n\nCheck console for details`, 8000);
             }
             return [];
         }
