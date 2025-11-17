@@ -5,6 +5,40 @@ All notable changes to the LLM Tagger Enhanced plugin will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### 🚧 In Progress
+- Nothing currently in development
+
+### 📋 Planned
+- See [TODO.md](TODO.md) for planned features and improvements
+
+## [2.1.4] - 2025-11-17
+
+### ✨ Added
+
+#### Mobile Support (iOS/iPadOS/Android)
+- **Feature**: Plugin now works on Obsidian Mobile
+- **Implementation**:
+  - Changed `isDesktopOnly: false` in manifest.json
+  - Plugin already has configurable Ollama URL setting
+  - Users can connect to remote Ollama instances
+- **Use Cases**:
+  - Access Ollama running on home/office computer via Tailscale
+  - Connect to Ollama server on local network
+  - Use any remote Ollama endpoint
+- **Setup**:
+  1. Install plugin on mobile device
+  2. Go to plugin settings
+  3. Change Ollama URL from `http://localhost:11434` to your remote URL
+  4. Example: `http://100.x.x.x:11434` (Tailscale) or `http://192.168.1.100:11434` (local network)
+- **Requirements**:
+  - Ollama must be running on accessible server
+  - Network connectivity to Ollama server
+  - Ollama server must allow connections from your device's IP
+- **Benefit**: Tag and organize notes on the go using your iPad/iPhone/Android device
+- **Note**: Mobile interface fully functional - all features work including bulk operations with cancel support
+
 ## [2.1.3] - 2025-11-13
 
 ### ✨ Added

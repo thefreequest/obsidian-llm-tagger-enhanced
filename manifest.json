@@ -1,10 +1,10 @@
 {
   "id": "llm-tagger-enhanced",
   "name": "LLM Tagger Enhanced",
-  "version": "2.1.3",
+  "version": "2.1.4",
   "minAppVersion": "1.0.0",
   "description": "Enhanced fork: Tag notes with Ollama LLMs - Multi-language support, custom instructions, and proper frontmatter integration",
   "author": "freequest (forked from David Jayatillake)",
   "authorUrl": "https://github.com/freequest",
-  "isDesktopOnly": true
+  "isDesktopOnly": false
 }
