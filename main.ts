@@ -590,6 +590,13 @@ Provide your response in this format:
 Summary: [your summary here]
 Suggested tags: [tag1, tag2, tag3]`;
 
+        // Log the prompt for debugging (can be commented out in production)
+        console.log('=== PROMPT SENT TO LLM ===');
+        console.log(`Model: ${this.settings.selectedModel}`);
+        console.log(`Min tags: ${this.settings.minTags}, Max tags: ${this.settings.maxTags}`);
+        console.log(`Available tags (${availableTags.length}):`, availableTags.join(', '));
+        // console.log('Full prompt:', prompt); // Uncomment to see full prompt
+
         // Get tag suggestions and summary from Ollama
         const url = this.normalizeOllamaUrl(this.settings.ollamaUrl);
         const response = await fetch(`${url}/api/generate`, {
@@ -607,6 +614,10 @@ Suggested tags: [tag1, tag2, tag3]`;
 
         // Parse the LLM response
         const llmResponse = data.response.trim();
+        console.log('=== LLM RESPONSE ===');
+        console.log(llmResponse);
+        console.log('===================');
+
         let summary = '';
         let llmTags: string[] = [];
 
